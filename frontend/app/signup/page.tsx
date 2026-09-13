@@ -1,7 +1,130 @@
 'use client';
-import {useState,FormEvent} from 'react';
-import {useRouter} from 'next/navigation';
-import {api,setToken} from '../../lib/api';
-export default function Signup(){const router=useRouter();const [form,setForm]=useState({company_name:'',name:'',email:'',password:''});const [setupToken,setSetupToken]=useState('');const [secret,setSecret]=useState('');const [uri,setUri]=useState('');const [code,setCode]=useState('');const [setup,setSetup]=useState(false);const [error,setError]=useState('');const [busy,setBusy]=useState(false);
- async function submit(e:FormEvent){e.preventDefault();setError('');setBusy(true);try{if(!setup){const r=await api<any>('/public/signup',{method:'POST',body:JSON.stringify(form)});if(r.mfa_setup_required){setSetupToken(r.mfa_setup_token);const s=await api<any>('/auth/mfa/setup-required',{method:'POST',headers:{'X-MFA-Setup-Token':r.mfa_setup_token}});setSecret(s.secret);setUri(s.otpauth_uri);setSetup(true)}else{setToken(r.access_token);router.replace('/onboarding')}}else{const r=await api<any>('/auth/mfa/verify-setup-required',{method:'POST',headers:{'X-MFA-Setup-Token':setupToken},body:JSON.stringify({code})});setToken(r.access_token);router.replace('/onboarding')}}catch(err){setError(err instanceof Error?err.message:'Unable to complete signup.')}finally{setBusy(false)}}
- return <main className="login"><form className="login-card" onSubmit={submit}><div className="brandmark">R</div>{!setup?<><h1>Start your RCAA trial</h1><p>Create a workspace and go directly into onboarding.</p><label className="field">Company name<input required minLength={2} value={form.company_name} onChange={e=>setForm({...form,company_name:e.target.value})}/></label><label className="field">Your name<input required minLength={2} value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label className="field">Work email<input required type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label className="field">Password<input required minLength={10} type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></label></>:<><h1>Secure your workspace</h1><p>MFA is required for administrator accounts. Add the account to your authenticator app, then enter the current code.</p><div className="notice"><b>Secret:</b> {secret}<br/><small>Provisioning URI: {uri}</small></div><label className="field">Authentication code<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))}/></label></>}{error&&<div className="notice error">{error}</div>}<button className="btn primary full" disabled={busy}>{busy?(setup?'Enabling…':'Creating…'):(setup?'Enable MFA & continue':'Create trial workspace')}</button>{!setup&&<p className="muted">Already have an account? <a className="link" href="/login">Sign in</a></p>}</form></main>}
+
+import { FormEvent, useState } from 'react';
+import Link from 'next/link';
+import { api } from '../../lib/api';
+
+export default function Register() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [merchantId, setMerchantId] = useState('');
+  const [bootstrapToken, setBootstrapToken] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (password.length < 10) {
+      setError('Password must be at least 10 characters.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api('/auth/register', {
+        method: 'POST',
+        headers: { 'X-Bootstrap-Token': bootstrapToken },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          merchant_id: merchantId.trim(),
+          role: 'ADMIN',
+        }),
+      });
+      setSuccess(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Registration failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <main className="login">
+        <div className="login-card">
+          <div className="brandmark">R</div>
+          <h1>Administrator created</h1>
+          <p>Your RCAA administrator account is ready. Sign in to continue.</p>
+          <Link className="btn primary full" href="/login">
+            Go to sign in
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="login">
+      <form className="login-card" onSubmit={submit}>
+        <div className="brandmark">R</div>
+        <h1>Create administrator</h1>
+        <p>
+          Create the first administrator for an existing merchant. The backend
+          validates the merchant and bootstrap authorization.
+        </p>
+
+        {error && <div className="notice error">{error}</div>}
+
+        <label className="field">
+          Email
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="username"
+          />
+        </label>
+
+        <label className="field">
+          Password
+          <input
+            required
+            minLength={10}
+            maxLength={128}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+        </label>
+
+        <label className="field">
+          Merchant ID
+          <input
+            required
+            value={merchantId}
+            onChange={(e) => setMerchantId(e.target.value)}
+            placeholder="Existing merchant identifier"
+          />
+        </label>
+
+        <label className="field">
+          Bootstrap token
+          <input
+            required
+            value={bootstrapToken}
+            onChange={(e) => setBootstrapToken(e.target.value)}
+            autoComplete="off"
+            placeholder="Local/deployment bootstrap token"
+          />
+        </label>
+
+        <button className="btn primary full" type="submit" disabled={busy}>
+          {busy ? 'Creating…' : 'Create administrator'}
+        </button>
+
+        <p className="muted">
+          Already have an account?{' '}
+          <Link className="link" href="/login">
+            Sign in
+          </Link>
+        </p>
+      </form>
+    </main>
+  );
+}
