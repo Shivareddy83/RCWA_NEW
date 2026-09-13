@@ -1,0 +1,136 @@
+services:
+  postgres:
+    networks:
+      rcaa:
+        aliases:
+          - postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - rcaa_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    networks:
+      rcaa:
+        aliases:
+          - backend
+    build:
+      context: ./backend
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set}
+      AUTH_BOOTSTRAP_TOKEN: ${AUTH_BOOTSTRAP_TOKEN:?AUTH_BOOTSTRAP_TOKEN must be set}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-manual}
+      RAZORPAY_PLAN_STARTER: ${RAZORPAY_PLAN_STARTER:-}
+      RAZORPAY_PLAN_GROWTH: ${RAZORPAY_PLAN_GROWTH:-}
+      RAZORPAY_PLAN_BUSINESS: ${RAZORPAY_PLAN_BUSINESS:-}
+      SETTLEMENT_WINDOW_DAYS: ${SETTLEMENT_WINDOW_DAYS:-3}
+      RECONCILIATION_TIMESTAMP_TOLERANCE_MINUTES: ${RECONCILIATION_TIMESTAMP_TOLERANCE_MINUTES:-30}
+      RECONCILIATION_AMOUNT_TOLERANCE: ${RECONCILIATION_AMOUNT_TOLERANCE:-0.00}
+      RECONCILIATION_TIMEZONE: ${RECONCILIATION_TIMEZONE:-UTC}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
+      DB_POOL_PRE_PING: ${DB_POOL_PRE_PING:-1}
+      RCAA_VERSION: ${RCAA_VERSION:-0.14.0}
+      BUILD_ID: ${BUILD_ID:-local}
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-unknown}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    networks:
+      rcaa:
+        aliases:
+          - worker
+    build:
+      context: ./backend
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUN_MIGRATIONS: "0"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-1}
+      JOB_RETRY_MAX_SECONDS: ${JOB_RETRY_MAX_SECONDS:-30}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
+      JOB_POLL_SECONDS: ${JOB_POLL_SECONDS:-1}
+      RCAA_VERSION: ${RCAA_VERSION:-0.14.0}
+      BUILD_ID: ${BUILD_ID:-local}
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-unknown}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    networks:
+      rcaa:
+        aliases:
+          - frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  rcaa:
+    driver: bridge
+
+volumes:
+  rcaa_postgres_data:

@@ -1,0 +1,243 @@
+name: RCAA Release Pipeline
+
+# One tag = one trip through every gate below, in order. Any gate failing
+# stops the pipeline before the next one runs.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ---- Gate 1: CI Tests -----------------------------------------------
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # ---- Gate 2: Security Scan (source + deps + secrets + CodeQL) -------
+  security-scan:
+    needs: ci
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+
+  version:
+    needs: security-scan
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.v.outputs.value }}
+    steps:
+      - id: v
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  # ---- Gate 3: Docker Build --------------------------------------------
+  docker-build:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ needs.version.outputs.value }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # NEXT_PUBLIC_API_URL is baked in at build time (Next.js constraint),
+      # so the frontend image is inherently environment-coupled: it needs
+      # the real production domain to be correct in production. Set the
+      # RCAA_DOMAIN repo variable so this build is correct; without it, the
+      # image falls back to a placeholder and staging-only smoke checks
+      # (below) are all this pipeline can validate for the frontend.
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.RCAA_DOMAIN && format('https://{0}/api/v1', vars.RCAA_DOMAIN) || 'http://localhost:8000/api/v1' }}
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ needs.version.outputs.value }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---- Gate 4: Image Scan (the exact images just pushed) --------------
+  image-scan:
+    needs: [version, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Trivy - backend
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ needs.version.outputs.value }}
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Trivy - frontend
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ needs.version.outputs.value }}
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # ---- Gate 5+6: Staging + Health Check (ephemeral, inside this job) --
+  staging:
+    needs: [version, image-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate ephemeral staging secrets
+        run: |
+          {
+            echo "POSTGRES_DB=rcaa_staging"
+            echo "POSTGRES_USER=rcaa_staging"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+            echo "AUTH_SECRET=$(openssl rand -hex 32)"
+            echo "AUTH_BOOTSTRAP_TOKEN=$(openssl rand -hex 24)"
+            echo "METRICS_AUTH_TOKEN=$(openssl rand -hex 24)"
+            echo "MFA_ENCRYPTION_KEY=$(python3 -c 'import secrets,base64;print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')"
+          } >> "$GITHUB_ENV"
+
+      - name: Write staging .env
+        run: |
+          cat > .env.staging <<EOF
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+          AUTH_SECRET=${AUTH_SECRET}
+          AUTH_BOOTSTRAP_TOKEN=${AUTH_BOOTSTRAP_TOKEN}
+          METRICS_AUTH_TOKEN=${METRICS_AUTH_TOKEN}
+          MFA_ENCRYPTION_KEY=${MFA_ENCRYPTION_KEY}
+          RCAA_VERSION=${{ needs.version.outputs.value }}
+          RCAA_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ needs.version.outputs.value }}
+          RCAA_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ needs.version.outputs.value }}
+          EOF
+
+      - name: Start staging stack
+        run: docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --wait --wait-timeout 120
+
+      - name: Health check gate (backend)
+        run: RCAA_BASE_URL=http://localhost:8000 ./scripts/release_health_gate.sh
+
+      - name: Smoke test
+        run: RCAA_BASE_URL=http://localhost:8000 ./scripts/smoke_test.sh
+
+      - name: Frontend responds
+        run: curl --fail --silent --show-error --max-time 10 http://localhost:3000 >/dev/null
+
+      - name: Dump staging logs on failure
+        if: failure()
+        run: docker compose --env-file .env.staging -f docker-compose.staging.yml logs --no-color
+
+      - name: Tear down staging stack
+        if: always()
+        run: docker compose --env-file .env.staging -f docker-compose.staging.yml down -v
+
+  # ---- Gate 7: Production (manual approval via the environment) -------
+  # Configure the "production" GitHub Environment with required reviewers
+  # so this job pauses for approval after staging passes, before touching
+  # the real server.
+  production:
+    needs: [version, staging]
+    runs-on: ubuntu-latest
+    if: ${{ vars.RCAA_DEPLOY_ENABLED == 'true' }}
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.RCAA_DEPLOY_HOST }}
+          username: ${{ secrets.RCAA_DEPLOY_USER }}
+          key: ${{ secrets.RCAA_DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.RCAA_DEPLOY_PATH }}"
+            git fetch --tags
+            git checkout "${{ github.ref_name }}"
+            export RCAA_BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}:${{ needs.version.outputs.value }}"
+            export RCAA_FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}:${{ needs.version.outputs.value }}"
+            ./scripts/deploy_production.sh
+
+      - name: Roll back immediately on failed deploy/health gate
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.RCAA_DEPLOY_HOST }}
+          username: ${{ secrets.RCAA_DEPLOY_USER }}
+          key: ${{ secrets.RCAA_DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.RCAA_DEPLOY_PATH }}"
+            ./scripts/rollback_production.sh
+
+  create-release:
+    needs: [version, production]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          name: RCAA ${{ github.ref_name }}
+
+  # ---- Gate 8: Monitor / Rollback --------------------------------------
+  # A second, delayed health check against the live public URL. Deploys
+  # can pass the immediate health gate and still fall over a minute later
+  # (slow migration, connection-pool exhaustion, etc.) -- this catches that
+  # window and rolls back automatically if it happens.
+  monitor:
+    needs: [version, production]
+    runs-on: ubuntu-latest
+    if: ${{ vars.RCAA_DEPLOY_ENABLED == 'true' }}
+    steps:
+      - name: Wait, then re-check production health
+        run: |
+          sleep 60
+          if ! curl -ksS --fail --max-time 10 "https://${{ vars.RCAA_DOMAIN }}/health" >/dev/null; then
+            echo "post-deploy health check failed" >&2
+            exit 1
+          fi
+
+      - name: Roll back on delayed failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.RCAA_DEPLOY_HOST }}
+          username: ${{ secrets.RCAA_DEPLOY_USER }}
+          key: ${{ secrets.RCAA_DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.RCAA_DEPLOY_PATH }}"
+            ./scripts/rollback_production.sh

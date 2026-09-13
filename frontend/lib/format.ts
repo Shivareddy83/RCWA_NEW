@@ -1,0 +1,4 @@
+const symbols:Record<string,string>={INR:'₹',USD:'$',EUR:'€',GBP:'£'};
+export function money(value:unknown,currency='INR'){if(value===null||value===undefined||value==='')return '—';const raw=String(value).trim();if(!/^-?\d+(?:\.\d+)?$/.test(raw))return raw;const negative=raw.startsWith('-');const unsigned=negative?raw.slice(1):raw;let [whole,decimal='']=unsigned.split('.');whole=whole.replace(/^0+(?=\d)/,'');decimal=(decimal+'00').slice(0,2);const grouped=whole.replace(/\B(?=(\d{3})+(?!\d))/g,',');return `${negative?'-':''}${symbols[currency]||currency+' '}${grouped}.${decimal}`}
+export function dateTime(value:unknown){if(!value)return '—';const d=new Date(String(value));return Number.isNaN(d.getTime())?String(value):new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}).format(d)+' UTC'}
+export function shortId(value:unknown){const s=String(value??'');return s.length>12?`${s.slice(0,8)}…${s.slice(-4)}`:s}

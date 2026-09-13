@@ -1,0 +1,23 @@
+'use client';
+import {FormEvent,useEffect,useState} from 'react';
+import Link from 'next/link';
+import {useRouter,useSearchParams} from 'next/navigation';
+import {api,setToken} from '../../lib/api';
+import {useAuth} from '../../lib/auth';
+
+export default function LoginPage(){
+ const {login,user}=useAuth();const router=useRouter();const search=useSearchParams();
+ const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [code,setCode]=useState('');const [challenge,setChallenge]=useState('');const [setupToken,setSetupToken]=useState('');const [secret,setSecret]=useState('');const [uri,setUri]=useState('');const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [mode,setMode]=useState<'password'|'mfa'|'setup'>('password');
+ useEffect(()=>{if(search.get('sso')!=='1')return; let active=true; (async()=>{try{const r=await api<any>('/auth/refresh',{method:'POST'}); if(!active)return; setToken(r.access_token); router.replace('/')}catch{if(active)setError('Enterprise SSO sign-in could not be completed.')}})(); return()=>{active=false}},[search,router]);
+ async function submit(e:FormEvent){e.preventDefault();if(busy)return;setError('');setBusy(true);try{
+   if(mode==='password'){const r=await login(email.trim().toLowerCase(),password);if(r.mfaRequired&&r.mfaChallenge){setChallenge(r.mfaChallenge);setMode('mfa');return}if(r.mfaSetupRequired&&r.mfaSetupToken){setSetupToken(r.mfaSetupToken);const setup=await api<any>('/auth/mfa/setup-required',{method:'POST',headers:{'X-MFA-Setup-Token':r.mfaSetupToken}});setSecret(setup.secret);setUri(setup.otpauth_uri);setMode('setup');return}router.replace('/');return}
+   if(mode==='mfa'){const r=await api<any>('/auth/mfa/verify-login',{method:'POST',body:JSON.stringify({challenge,code})});setToken(r.access_token);router.replace('/');return}
+   const r=await api<any>('/auth/mfa/verify-setup-required',{method:'POST',headers:{'X-MFA-Setup-Token':setupToken},body:JSON.stringify({code})});setToken(r.access_token);router.replace('/');
+  }catch(err){setError(err instanceof Error?err.message:'Unable to complete authentication.')}finally{setBusy(false)}}
+ if(user)return null;
+ return <main className="login"><form className="login-card" onSubmit={submit}><div className="brandmark">R</div>
+  {mode==='password'&&<><h1>Sign in to RCAA</h1><p>Payment operations and reconciliation console.</p>{error&&<div className="notice error" role="alert">{error}</div>}<label className="field">Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" disabled={busy}/></label><label className="field">Password<input required type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" disabled={busy}/></label><button className="btn primary full" disabled={busy}>{busy?'Signing in…':'Sign in'}</button><p className="muted"><Link className="link" href="/forgot-password">Forgot password?</Link></p><p className="muted"><button type="button" className="btn ghost full" onClick={()=>{const q=email.trim()?`?email=${encodeURIComponent(email.trim().toLowerCase())}`:"";window.location.href=`/api/v1/auth/sso/start${q}`}}>Continue with Enterprise SSO</button></p><p className="muted">Need initial setup? <Link className="link" href="/register">Create administrator</Link></p></>}
+  {mode==='mfa'&&<><h1>Verify your identity</h1><p>Enter the 6-digit code from your authenticator app.</p>{error&&<div className="notice error">{error}</div>}<label className="field">Authentication code<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))}/></label><button className="btn primary full" disabled={busy}>{busy?'Verifying…':'Verify code'}</button><button type="button" className="btn ghost full" onClick={()=>{setMode('password');setCode('');setError('')}}>Back</button></>}
+  {mode==='setup'&&<><h1>Set up MFA</h1><p>Your organization requires multi-factor authentication. Add this account to an authenticator app, then enter the current code.</p>{error&&<div className="notice error">{error}</div>}<div className="notice"><b>Account:</b> {email}<br/><b>Secret:</b> {secret}<br/><small>Provisioning URI: {uri}</small></div><label className="field">Authentication code<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))}/></label><button className="btn primary full" disabled={busy}>{busy?'Enabling…':'Enable MFA & continue'}</button></>}
+ </form></main>
+}

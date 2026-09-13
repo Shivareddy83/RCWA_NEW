@@ -1,0 +1,9 @@
+# Example only. Configure a real receiver in your production monitoring system.
+route:
+  receiver: rcaa-oncall
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+receivers:
+  - name: rcaa-oncall
+    # Add your approved email/Slack/PagerDuty receiver here.

@@ -1,0 +1,243 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    stop_grace_period: 60s
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-1g}
+    cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - rcaa_postgres_data:/var/lib/postgresql/data
+    networks:
+      rcaa:
+        aliases:
+          - postgres
+    expose:
+      - "5432"
+    ports: []
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    image: ${RCAA_BACKEND_IMAGE:-rcaa-backend:local}
+    restart: always
+    init: true
+    stop_grace_period: 60s
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
+    cpus: ${BACKEND_CPU_LIMIT:-1.0}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+    networks:
+      rcaa:
+        aliases:
+          - backend
+    expose:
+      - "8000"
+    ports: []
+    environment:
+      APP_ENV: production
+      RUN_MIGRATIONS: "1"
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:?TRUST_PROXY_HEADERS must be set}
+      METRICS_AUTH_TOKEN: ${METRICS_AUTH_TOKEN:?METRICS_AUTH_TOKEN must be set}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY must be set}
+      MFA_ISSUER: ${MFA_ISSUER:-RCAA}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY must be set}
+      AUTH_BOOTSTRAP_TOKEN: ${AUTH_BOOTSTRAP_TOKEN:?AUTH_BOOTSTRAP_TOKEN must be set}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-manual}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      RAZORPAY_PLAN_STARTER: ${RAZORPAY_PLAN_STARTER:-}
+      RAZORPAY_PLAN_GROWTH: ${RAZORPAY_PLAN_GROWTH:-}
+      RAZORPAY_PLAN_BUSINESS: ${RAZORPAY_PLAN_BUSINESS:-}
+      MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-1}
+      REFRESH_COOKIE_SAMESITE: ${REFRESH_COOKIE_SAMESITE:-lax}
+      REFRESH_COOKIE_DOMAIN: ${REFRESH_COOKIE_DOMAIN:-}
+      UPLOAD_RETENTION_DAYS: ${UPLOAD_RETENTION_DAYS:-30}
+      RAW_DATA_RETENTION_DAYS: ${RAW_DATA_RETENTION_DAYS:-90}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-10485760}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-1}
+      RATE_LIMIT_LOGIN_IP: ${RATE_LIMIT_LOGIN_IP:-60}
+      RATE_LIMIT_LOGIN_EMAIL: ${RATE_LIMIT_LOGIN_EMAIL:-10}
+      RATE_LIMIT_LOGIN_WINDOW_SECONDS: ${RATE_LIMIT_LOGIN_WINDOW_SECONDS:-300}
+      RATE_LIMIT_SIGNUP_IP: ${RATE_LIMIT_SIGNUP_IP:-20}
+      RATE_LIMIT_SIGNUP_EMAIL: ${RATE_LIMIT_SIGNUP_EMAIL:-5}
+      RATE_LIMIT_SIGNUP_WINDOW_SECONDS: ${RATE_LIMIT_SIGNUP_WINDOW_SECONDS:-3600}
+      RATE_LIMIT_DEMO_IP: ${RATE_LIMIT_DEMO_IP:-20}
+      RATE_LIMIT_DEMO_EMAIL: ${RATE_LIMIT_DEMO_EMAIL:-5}
+      RATE_LIMIT_DEMO_WINDOW_SECONDS: ${RATE_LIMIT_DEMO_WINDOW_SECONDS:-3600}
+      RAZORPAY_WEBHOOK_ALLOWED_IPS: ${RAZORPAY_WEBHOOK_ALLOWED_IPS:-}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
+      DB_POOL_PRE_PING: ${DB_POOL_PRE_PING:-1}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-1}
+      JOB_RETRY_MAX_SECONDS: ${JOB_RETRY_MAX_SECONDS:-30}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
+      JOB_POLL_SECONDS: ${JOB_POLL_SECONDS:-1}
+      PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-30}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
+      PASSWORD_RESET_PUBLIC_BASE_URL: ${PASSWORD_RESET_PUBLIC_BASE_URL:-https://localhost}
+      CONNECTOR_SYNC_DEFAULT_INTERVAL_MINUTES: ${CONNECTOR_SYNC_DEFAULT_INTERVAL_MINUTES:-360}
+      SLA_CRITICAL_HOURS: ${SLA_CRITICAL_HOURS:-4}
+      SLA_HIGH_HOURS: ${SLA_HIGH_HOURS:-24}
+      SLA_MEDIUM_HOURS: ${SLA_MEDIUM_HOURS:-72}
+      SLA_LOW_HOURS: ${SLA_LOW_HOURS:-120}
+      RCAA_VERSION: ${RCAA_VERSION:-0.14.0}
+      BUILD_ID: ${BUILD_ID:-local}
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-unknown}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  worker:
+    build:
+      context: ./backend
+    image: ${RCAA_BACKEND_IMAGE:-rcaa-backend:local}
+    restart: always
+    init: true
+    stop_grace_period: 90s
+    mem_limit: ${WORKER_MEMORY_LIMIT:-768m}
+    cpus: ${WORKER_CPU_LIMIT:-1.0}
+    pids_limit: ${WORKER_PIDS_LIMIT:-256}
+    networks:
+      rcaa:
+        aliases:
+          - worker
+    environment:
+      APP_ENV: production
+      RUN_MIGRATIONS: "0"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY must be set}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-1}
+      JOB_RETRY_MAX_SECONDS: ${JOB_RETRY_MAX_SECONDS:-30}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
+      JOB_POLL_SECONDS: ${JOB_POLL_SECONDS:-1}
+      PASSWORD_RESET_EXPIRE_MINUTES: ${PASSWORD_RESET_EXPIRE_MINUTES:-30}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
+      PASSWORD_RESET_PUBLIC_BASE_URL: ${PASSWORD_RESET_PUBLIC_BASE_URL:-https://localhost}
+      CONNECTOR_SYNC_DEFAULT_INTERVAL_MINUTES: ${CONNECTOR_SYNC_DEFAULT_INTERVAL_MINUTES:-360}
+      SLA_CRITICAL_HOURS: ${SLA_CRITICAL_HOURS:-4}
+      SLA_HIGH_HOURS: ${SLA_HIGH_HOURS:-24}
+      SLA_MEDIUM_HOURS: ${SLA_MEDIUM_HOURS:-72}
+      SLA_LOW_HOURS: ${SLA_LOW_HOURS:-120}
+      RCAA_VERSION: ${RCAA_VERSION:-0.14.0}
+      BUILD_ID: ${BUILD_ID:-local}
+      GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-unknown}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://localhost/api/v1}
+    image: ${RCAA_FRONTEND_IMAGE:-rcaa-frontend:local}
+    restart: always
+    init: true
+    stop_grace_period: 30s
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
+    cpus: ${FRONTEND_CPU_LIMIT:-1.0}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-256}
+    networks:
+      rcaa:
+        aliases:
+          - frontend
+    expose:
+      - "3000"
+    ports: []
+    environment:
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: always
+    mem_limit: ${CADDY_MEMORY_LIMIT:-256m}
+    cpus: ${CADDY_CPU_LIMIT:-0.5}
+    pids_limit: ${CADDY_PIDS_LIMIT:-128}
+    networks:
+      rcaa:
+        aliases:
+          - caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RCAA_DOMAIN: ${RCAA_DOMAIN:?RCAA_DOMAIN must be set}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  rcaa:
+    driver: bridge
+
+volumes:
+  rcaa_postgres_data:
+  caddy_data:
+  caddy_config:

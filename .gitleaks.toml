@@ -1,0 +1,13 @@
+# Synthetic credentials used only by automated tests. These are not production
+# credentials and are intentionally present so redaction/authentication tests
+# can exercise secret-handling behavior.
+[allowlist]
+paths = [
+  '''tests/test_stage08_audit\.py''',
+  '''tests/test_stage09_observability\.py''',
+  '''tests/test_stage11_security_hardening\.py''',
+  '''tests/test_v10_product_stage\.py''',
+  '''tests/test_v10_1_activation\.py''',
+  '''tests/test_v10_2_customer_success\.py''',
+  '''backend/tests/test_v10_4_security_hardening\.py'''
+]

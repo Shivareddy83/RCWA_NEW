@@ -1,0 +1,71 @@
+name: RCAA CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    env:
+      AUTH_SECRET: ci-test-secret-abcdefghijklmnopqrstuvwxyz-123456
+      DATABASE_URL: sqlite:///./ci.db
+      TESTING: "1"
+      RCAA_LEGACY_TEST_AUTH: "1"
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt
+
+      - name: Backend regression
+        run: PYTHONPATH=backend pytest -q tests
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Frontend source hygiene
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config
+
+      - name: Docker images build
+        run: docker compose build --no-cache

@@ -1,0 +1,23 @@
+groups:
+  - name: rcaa-production
+    rules:
+      - alert: RCAAAPIHigh5xx
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "RCAA API 5xx rate above 2%" }
+      - alert: RCAAAPIHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "RCAA API p95 latency above 2 seconds" }
+      - alert: RCAAJobDeadLettered
+        expr: increase(jobs_dead_lettered_total[15m]) > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "RCAA background job dead-lettered" }
+      - alert: RCAAStaleJobs
+        expr: increase(jobs_stale_recovered_total[15m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "RCAA recovered stale worker jobs" }
