@@ -20,7 +20,7 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v5
