@@ -35,15 +35,14 @@ test(
 
 
 test(
-  'browser API requests use the same-origin production route',
+  'browser API requests use the configured backend API route',
   async () => {
     const s = await source('../lib/api.ts');
-    assert.match(s, /typeof window !== 'undefined'/);
-    assert.match(s, /return '\/api\/v1'/);
+
+    assert.match(s, /process\.env\.NEXT_PUBLIC_API_URL/);
+    assert.match(s, /http:\/\/localhost:8000\/api\/v1/);
   },
 );
-
-
 test(
   'API 401 invalidates the browser session and emits an auth-expired event',
   async () => {

@@ -28,9 +28,6 @@ function safeErrorMessage(status: number, authenticatedSession: boolean): string
 }
 
 export function baseUrl(): string {
-  // Browser requests use the same origin so production traffic always goes through Caddy.
-  // The env value remains available for non-browser/build tooling.
-  if (typeof window !== 'undefined') return '/api/v1';
   return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 }
 
